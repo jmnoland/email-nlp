@@ -29,7 +29,6 @@ class DatabaseManager():
                             EmailIndex INTEGER,
                             Path TEXT,
                             Subject TEXT,
-                            Content TEXT,
                             RecievedAt TIMESTAMP NOT NULL
                     );""")
             self.__conn.commit()
@@ -78,8 +77,8 @@ class DatabaseManager():
         self.__conn.commit()
         return self.__cur.lastrowid
 
-    def SaveEmail(self, sendId, path, subject, content, recievedAt):
-        self.__cur.execute("""INSERT INTO Email (SenderId, EmailIndex, Path, Subject, Content, RecievedAt) VALUES (?,?,?,?,?)""", (sendId, path, subject, content, recievedAt))
+    def SaveEmail(self, sendId, path, subject, recievedAt):
+        self.__cur.execute("""INSERT INTO Email (SenderId, EmailIndex, Path, Subject, RecievedAt) VALUES (?,?,?,?,?)""", (sendId, path, subject, recievedAt))
         self.__conn.commit()
         return self.__cur.lastrowid
     
