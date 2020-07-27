@@ -17,68 +17,77 @@ class EmailFetch():
         self.getSettings()
         self.imapConnect()
         status, messages = self.__imap.select("INBOX")
-        messages = int(messages[0])
+        messagesCount = int(messages[0])
 
-        for i in range(messages, messages-2, -1):
+        curIndex = self.__db.GetCurrentIndex()
+        for i in range(curIndex, messagesCount, 1):
             res, msg = self.__imap.fetch(str(i), "(RFC822)")
-            for response in msg:
-                if isinstance(response, tuple):
-                    msg = email.message_from_bytes(response[1])
-                    subject = decode_header(msg["Subject"])[0][0]
-                    if isinstance(subject, bytes):
-                        subject = subject.decode()
-                    sender = msg.get("From")
+            self.getMail(msg)
 
-                    provId = self.ParseAddress(sender)
-                    senderId = self.__db.SaveSender(provId, "None", sender)                    
-                    # if the email message is multipart
-                    if msg.is_multipart():
-                        # iterate over email parts
-                        body = None
-                        filepath = None
-                        for part in msg.walk():
-                            # extract content type of email
-                            content_type = part.get_content_type()
-                            content_disposition = str(part.get("Content-Disposition"))
-                            try:
-                                # get the email body
-                                body = part.get_payload(decode=True).decode()
-                            except:
-                                pass
-                            if content_type == "text/plain" and "attachment" not in content_disposition:
-                                # print text/plain emails and skip attachments
-                                print(body)
-                            elif "attachment" in content_disposition:
-                                filename = part.get_filename()
-                                if filename:
-                                    if not os.path.isdir("files"):
-                                        os.mkdir("files")
-                                    filepath = os.path.join("files", filename)
-                                    open(filepath, "wb").write(part.get_payload(decode=True))
-                        self.__db.SaveEmail(senderId, filepath, subject, body, datetime.datetime.now())
-
-                    else:
-                        # extract content type of email
-                        content_type = msg.get_content_type()
-                        # get the email body
-                        body = msg.get_payload(decode=True).decode()
-                        if content_type == "text/plain":
-                            # print only text email parts
-                            print(body)
-                    if content_type == "text/html":
-                        # if it's HTML, create a new HTML file and open it in browser
-                        if not os.path.isdir(subject):
-                            # make a folder for this email (named after the subject)
-                            os.mkdir(subject)
-                        filename = f"{subject[:50]}.html"
-                        filepath = os.path.join(subject, filename)
-                        # write the file
-                        open(filepath, "w").write(body)
-                        # open in the default browser
-                        webbrowser.open(filepath)
-
+        self.__db.SaveIndex(messagesCount)
         self.imapDisconnect()
         self.__db.CloseConnection()
+
+    def getMail(self, msg):
+        filePath = None
+        for response in msg:
+            if isinstance(response, tuple):
+                mail = email.message_from_bytes(response[1])
+                subject = decode_header(mail["Subject"])[0][0]
+                if isinstance(subject, bytes):
+                    subject = subject.decode()
+                sender = mail.get("From")
+
+                provId = self.parseAddress(sender)
+                senderId = self.__db.SaveSender(provId, "None", sender)                    
+                if mail.is_multipart():
+                    filePath = self.saveMultipartMail(mail)
+
+                else:
+                    content_type = mail.get_content_type()
+                    body = mail.get_payload(decode=True).decode()
+                    if content_type == "text/plain":
+                        filePath = self.saveNonMultipartMail(body, subject)
+                if content_type == "text/html":
+                    filePath = self.saveNonMultipartMail(body, subject, True)
+
+        self.__db.SaveEmail(senderId, filePath, subject, datetime.datetime.now())
+
+    def saveMultipartMail(self, mail):
+        filePaths = []
+        for part in mail.walk():
+            filePath = None
+            content_type = part.get_content_type()
+            content_disposition = str(part.get("Content-Disposition"))
+            try:
+                body = part.get_payload(decode=True).decode()
+            except:
+                pass
+            if "attachment" in content_disposition:
+                filename = part.get_filename()
+                if filename:
+                    if not os.path.isdir("files"):
+                        os.mkdir("files")
+                    filePath = os.path.join("files", filename)
+                    with open(filePath, "wb") as mailFile:
+                        mailFile.write(part.get_payload(decode=True))
+            else:
+                with open(filePath, "wb") as mailFile:
+                    mailFile.write(body)
+
+            if filePath != None:
+                filePaths.append(filePath)
+        return [filePaths]
+    
+    def saveNonMultipartMail(self, body, subject, html = False):
+        ext = "txt"
+        if html:
+            ext = "html"
+        filename = f"{subject[:50]}.{ext}"
+        filepath = os.path.join(subject, filename)
+        with open(filepath, "w") as mailFile:
+            mailFile.write(body)
+        return [filepath]
 
     def getSettings(self):
         with open('settings.json', 'r') as json_file:
@@ -92,7 +101,7 @@ class EmailFetch():
         self.__imap.close()
         self.__imap.logout()
 
-    def ParseAddress(self, sender):
+    def parseAddress(self, sender):
         print(sender)
         exts = sender.split("@")[1].split('.')
         provider = exts[0]
